@@ -65,10 +65,6 @@ impl Uart {
         std::mem::take(&mut self.tx)
     }
 
-    pub fn clear_pending(&mut self) {
-        self.tx.clear();
-    }
-
     /// Total bytes ever transmitted, across drains.
     pub fn transmitted(&self) -> u64 {
         self.transmitted
