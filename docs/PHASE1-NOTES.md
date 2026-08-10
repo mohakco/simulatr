@@ -1,7 +1,12 @@
 # Phase 1 notes
 
 Things worth understanding about the code, especially the Xtensa quirks it had to handle.
-Read `src/cpu/decode.zig` alongside this.
+Read `crates/simulatr-core/src/cpu/decode.rs` alongside this.
+
+Phase 1 was originally built in Zig and then ported to Rust; everything in the Xtensa
+sections below is language-independent and was validated against real
+`xtensa-esp-elf-gcc` output before the port. The Zig implementation is preserved at the
+git tag `zig-phase1`.
 
 ---
 
@@ -24,9 +29,11 @@ Bytes `b0 b1 b2` form the value `b0 | b1<<8 | b2<<16`. The ISA manual numbers in
 bits from 0 = least significant and draws its field diagrams right-to-left, so `op0` is
 bits 3:0 and lives in the *first* byte in memory.
 
-This is why `Fields24` is a `packed struct(u24)` with `op0` declared first: Zig lays
-packed-struct fields out starting at the least significant bit, so the declaration can be
-read straight off the manual's diagram. `@bitCast` between the u24 and the struct is free.
+The Zig version expressed this as a `packed struct(u24)` with `op0` declared first, since
+Zig lays packed-struct fields out from the least significant bit — the declaration could
+be read straight off the manual's diagram. Rust has no equivalent guarantee, so the port
+uses a `Fields` newtype over the raw `u32` with one accessor per field. That turns out to
+be the better shape anyway, because of the next section.
 
 ### Fields overlap between formats
 
@@ -38,16 +45,17 @@ The same bits mean different things in different formats:
 | 7:6 | part of `t` | part of `t` | `m` (condition) | part of `offset` |
 | 5:4 | part of `t` | part of `t` | `n` (sub-group) | `n` (window inc) |
 
-So the packed struct only covers the *regular* fields; `imm8`, `imm12`, `imm16`,
-`offset18`, `m` and `n` are pulled out by explicit shifting. That is not sloppiness — the
-overlap is real and there is no single struct that describes all formats.
+There is no single struct that describes all formats, so `Fields` simply exposes both
+views of the same word: `op1`/`op2` *and* `imm8`, `t` *and* its `m`/`n` halves. Callers
+pick the view their format uses. The overlap is real; pretending otherwise is what
+produces subtly wrong decoders.
 
 ### Load and store offsets are unsigned and scaled
 
 `l32i a2, a3, 8` encodes 8 as `imm8 = 2`, because the field is scaled by the access width.
 `l32i` reaches 0..1020 bytes past the base register, `l16ui` 0..510, `l8ui` 0..255. All
-**forward only** — there are no negative load offsets. The decoder pre-scales, so
-`Instruction.imm` is always the byte offset.
+**forward only** — there are no negative load offsets. The decoder pre-scales, so the
+`offset` field of `Inst::Load` / `Inst::Store` is always a byte offset.
 
 Meanwhile `addi`'s immediate *is* signed (-128..127), and `movi`'s is a signed 12-bit
 value (-2048..2047) assembled from two non-adjacent fields (`s` supplies bits 11:8,
@@ -120,7 +128,10 @@ There is no consistent rule, and this is the easiest place to introduce a silent
 | `mov.n` | `t` |
 | `movi.n` | `s` |
 
-Each arm of the executor's switch says which one it writes.
+In the Rust port this table is encoded in the `Inst` enum itself: every variant names its
+operands (`dst`, `src`, `base`, `lhs`, `rhs`), so the mapping is decided once in the
+decoder and the executor cannot get it wrong. That is the single biggest correctness win
+of the port.
 
 ### RET is 0x000080, and the all-zero word is the illegal instruction
 
@@ -138,8 +149,8 @@ both are worth memorising because they show up constantly in hex dumps.
 Phase 1 implements only the **call0 ABI**: 16 flat registers, `a0` holds the return
 address, `a1` is the stack pointer, and `CALL0` simply overwrites `a0`. A function that
 both calls and returns therefore has to spill `a0` to the stack first — see the
-`call0 saves the return address in a0` test in `src/cpu/core.zig`, which does exactly
-that. Register windows (`CALL4/8/12`, `ENTRY`, `RETW`) exist precisely to avoid that
+`call0_clobbers_a0_so_the_caller_must_spill_it` test in
+`crates/simulatr-core/src/cpu/core.rs`, which does exactly that. Register windows (`CALL4/8/12`, `ENTRY`, `RETW`) exist precisely to avoid that
 spill, and they are the first job of Phase 2. The decoder refuses them rather than
 pretending.
 
@@ -147,19 +158,19 @@ pretending.
 
 There is no operating system to return to, so `Cpu` stops on:
 
-1. `ret` landing on `halt_address` (0xDEADBEE0), which is planted in `a0` at reset;
+1. `ret` landing on `HALT_ADDRESS` (0xDEADBEE0), which is planted in `a0` at reset;
 2. a jump or taken branch to itself (`j .`), which is how firmware signals it is done;
 3. the step budget running out;
-4. any decode or bus error, recorded in `Cpu.fault`.
+4. any decode or bus error, carried in `HaltReason::Fault`.
 
 The exit code reflects which: 0 for 1 and 2, 2 for the budget, 3 for a fault.
 
 ### Validated against the real toolchain
 
 `examples/hello.elf` is built by `xtensa-esp-elf-gcc` from `examples/hello.S`, embedded
-into the test binary with `@embedFile`, and executed by a unit test that checks both the
-output and the instruction count. Two things this caught that hand-assembly alone would
-not have:
+into the test binary with `include_bytes!`, and executed by a unit test that checks the
+output, the instruction count, and that narrow forms were exercised. Two things this
+caught that hand-assembly alone would not have:
 
 - **GCC uses narrow forms unprompted.** The source says `movi`, `s32i`, `addi`; the
   assembler emits `movi.n`, `s32i.n`, `addi.n`. Any decoder that only handles 24-bit
@@ -169,50 +180,93 @@ not have:
   it with `NotLittleEndian`, which is the right answer, but it is a confusing five minutes
   if you do not know to look. See `examples/build.sh`.
 
-### Everything except `host_io.zig` is free of host I/O
+### The whole emulator is free of host I/O
 
-The CPU, bus, loader, UART and tracer are pure computation over bytes in memory. That is
-what lets all 78 unit tests run without opening a file, and it is what will make
-snapshot/restore and deterministic replay tractable in Phase 7.
+`simulatr-core` is pure computation over bytes in memory: no filesystem, no clock, no
+threads, no randomness, and no dependencies. That is what lets every core test run without
+opening a file, what will make snapshot/restore and deterministic replay tractable in
+Phase 7, and what keeps a WASM build viable. All host I/O lives in `simulatr-cli`.
 
 ---
 
-## Zig 0.16 notes
+## Rust notes
 
-Zig 0.16 reworked I/O around an explicit `std.Io` value, passed in the same way an
-`Allocator` is. Consequences you will hit if you are following older material:
+Things about the port worth knowing before you change it.
 
-- `std.fs.File` no longer exists. The file type is **`std.Io.File`**, the directory type is
-  **`std.Io.Dir`**, and their methods take an `Io` as an argument.
-- `main` can take a `std.process.Init` parameter, which carries `io`, `gpa`, `arena` and
-  the command-line arguments. No hidden globals, and no `std.process.argsAlloc`.
-- Writing goes through **`std.Io.Writer`**, which is buffered: bytes sit in a buffer *you*
-  supply until `flush()`. Forgetting to flush means no output at all.
-- `std.Io.Writer.fixed(&array)` gives a writer that drains into a byte array — the clean
-  way to capture output in a test, used in the `HELLO` end-to-end test.
-- `{t}` in a format string prints an error or enum by name, replacing `@errorName`.
+### The borrow-checker design, and why there is no `Rc<RefCell<_>>`
 
-Other Zig things this codebase leans on, in the order the plan wanted to teach them:
-`build.zig`, slices vs arrays (`Uart.tx_buffer` is an array, `Bus.iram` is a slice),
-`comptime` (`signExtend`'s width parameter, the firmware image built at compile time),
-packed structs (`Fields24`), error unions and `try` (`BusError!u32`), `defer`/`errdefer`
-(allocator cleanup), optionals (`?*Tracer`, `?*std.Io.Writer`), and allocator plumbing
-(`Bus.init` takes one, `deinit` takes the same one back).
+Emulator state looks like a cyclic mutable graph — peripherals raise interrupts on the
+CPU, the CPU reads through the bus, the bus dispatches to peripherals — and that is how
+most Rust emulators end up as `Rc<RefCell<_>>` soup. Three rules avoid it, and they are
+load-bearing rather than stylistic:
 
-### One sharp edge worth internalising
+- **`Machine` owns everything.** `Bus` owns its peripherals by value; nothing is shared.
+- **The CPU does not own the bus.** `Cpu::step(&mut self, bus: &mut Bus)` takes it as a
+  parameter, so `Machine::run` can pass `&mut self.cpu` and `&mut self.bus` as two
+  disjoint field borrows. That single signature choice is what makes the rest work.
+- **Peripherals never call back into the CPU.** The UART accumulates transmitted bytes,
+  and the run loop drains them into an `Observer` after each instruction. Callbacks are
+  what create the cycle; returning data breaks it.
 
-`Bus` holds a `*Uart`, and `Machine` holds both. A constructor that returned a `Machine`
-*by value* would copy the struct to the caller's storage and leave that pointer aimed at
-the dead temporary. So `Machine.init` and `Bus.init` are written to be called on a struct
-that is already in its final location. Zig has no move constructors and will not warn you
-about this — the same pattern appears in every test harness in the codebase.
+Nothing in Phase 1 needed to bend these. If something later genuinely does — the CAN
+fabric shared across nodes is the likely candidate — the answer is indices into a slab,
+not `Rc`.
+
+### Where the type system does work Zig could not
+
+- **`Inst` is an enum whose variants name their operands.** The per-format
+  destination-register table above is encoded in the type, so the executor's `match` can
+  only read `dst`, never guess between `r`, `s` and `t`.
+- **`Reg` is a newtype** constructed by masking to 4 bits, so register-file indexing is
+  infallible and a raw immediate cannot be passed where a register belongs.
+- **`InstSize` is an enum**, not a `u32`, which makes `decode` total: there is no "size 5"
+  case to panic on.
+- **`DecodeError` keeps `Illegal` and `Unsupported` apart**, with `Unsupported` carrying a
+  `&'static str` naming the missing feature ("call4/8/12: requires register windows"). A
+  failing run tells you immediately whether you found a bug or hit a known boundary.
+- **Exhaustive `match`** means adding an `Inst` variant is a compile error everywhere it
+  must be handled — the decoder, the executor and `Decoded::mnemonic`.
+
+What was genuinely nicer in Zig: `comptime` decode-table generation, and packed structs
+with a guaranteed bit layout. Neither mattered enough here to miss.
+
+### `Decoded::mnemonic` exists because `Inst` is deliberately lossy
+
+`Inst` groups by semantics — one `Alu` variant for five operations, one `Load` for four
+widths — so the executor stays small. But a trace should say `s32i.n`, not "a 32-bit
+store", so the exact mnemonic is recovered from the variant plus the size. Note that
+`addmi` decodes to `Inst::Addi` and therefore traces as `addi`; its scaled immediate is
+what distinguishes it, and the trace shows that.
+
+### `wrapping_add` / `wrapping_sub` everywhere, on purpose
+
+Every address computation and every ALU operation wraps, because that is what the
+hardware does. Plain `+` would panic in a debug build the first time firmware overflows a
+register — which is normal, expected behaviour for a CPU. The Zig version used `+%` and
+`-%` for the same reason.
+
+### Tests are colocated, and the fixture is compiled in
+
+`#[cfg(test)] mod tests` at the bottom of each module, so a module and its tests move
+together. `examples/hello.elf` is pulled in with `include_bytes!`, so `cargo test` needs
+no Xtensa toolchain even though it runs genuine GCC output.
+
+### Formatting
+
+`rustfmt.toml` sets `use_small_heuristics = "Max"`. The decoder tables and the SoC memory
+map read as one-line records; default rustfmt explodes them to one field per line and the
+tabular structure disappears.
 
 ---
 
 ## Where the seams are for Phase 2
 
-- `src/soc/esp32.zig` holds every chip-specific constant. An S3 profile is a sibling file.
-- `src/cpu/decode.zig` returns `UnsupportedInstruction` for exactly the instructions
-  Phase 2 must add; grep for it to get the work list.
-- `src/machine.zig` is the "Node" boundary the orchestrator will multiply.
-- `Cpu.run` takes a step budget, which is where a virtual clock will hook in.
+- `soc/esp32.rs` holds every chip-specific constant, and `esp32::decode` is the only
+  place an address is interpreted. An S3 profile is a sibling module with its own
+  `decode`.
+- `cpu/decode.rs` returns `DecodeError::Unsupported` for exactly the instructions Phase 2
+  must add, each with a `what` string. `grep -o 'unsupported(word, "[^"]*"' ` gives the
+  work list.
+- `machine.rs` is the "Node" boundary the orchestrator will multiply, and `Observer` is
+  where a scheduler or a snapshotter hooks in.
+- `Machine::run` takes a step budget, which is where the virtual clock replaces it.
