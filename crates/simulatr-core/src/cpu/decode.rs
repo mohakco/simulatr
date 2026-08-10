@@ -119,24 +119,69 @@ pub enum ZeroCond {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Inst {
     /// `AR[dst] <- mem[AR[base] + offset]`
-    Load { kind: LoadKind, dst: Reg, base: Reg, offset: u32 },
+    Load {
+        kind: LoadKind,
+        dst: Reg,
+        base: Reg,
+        offset: u32,
+    },
     /// `mem[AR[base] + offset] <- AR[src]`
-    Store { kind: StoreKind, src: Reg, base: Reg, offset: u32 },
+    Store {
+        kind: StoreKind,
+        src: Reg,
+        base: Reg,
+        offset: u32,
+    },
     /// `AR[dst] <- mem[literal]`, where `literal` was resolved at decode time.
-    L32r { dst: Reg, literal: u32 },
-    Movi { dst: Reg, imm: i32 },
+    L32r {
+        dst: Reg,
+        literal: u32,
+    },
+    Movi {
+        dst: Reg,
+        imm: i32,
+    },
     /// Covers `addi`, `addmi` and `addi.n`; `imm` is already scaled.
-    Addi { dst: Reg, src: Reg, imm: i32 },
-    Alu { op: AluOp, dst: Reg, lhs: Reg, rhs: Reg },
-    Mov { dst: Reg, src: Reg },
-    Jump { target: u32 },
-    JumpReg { target: Reg },
+    Addi {
+        dst: Reg,
+        src: Reg,
+        imm: i32,
+    },
+    Alu {
+        op: AluOp,
+        dst: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    Mov {
+        dst: Reg,
+        src: Reg,
+    },
+    Jump {
+        target: u32,
+    },
+    JumpReg {
+        target: Reg,
+    },
     /// `a0 <- return address; PC <- target`. Call0 ABI only: no window rotation.
-    Call { target: u32 },
-    CallReg { target: Reg },
+    Call {
+        target: u32,
+    },
+    CallReg {
+        target: Reg,
+    },
     Ret,
-    Branch { cond: Cond, lhs: Reg, rhs: Reg, target: u32 },
-    BranchZero { cond: ZeroCond, src: Reg, target: u32 },
+    Branch {
+        cond: Cond,
+        lhs: Reg,
+        rhs: Reg,
+        target: u32,
+    },
+    BranchZero {
+        cond: ZeroCond,
+        src: Reg,
+        target: u32,
+    },
     /// Memory-access ordering barrier. An in-order interpreter that completes each
     /// access before starting the next already satisfies it, but firmware needs it to be
     /// *legal*.
@@ -358,9 +403,7 @@ fn decode_qrst(word: u32, f: Fields) -> Result<Inst, DecodeError> {
         return Err(unsupported(word, "shift/multiply/special-register group"));
     }
 
-    let alu = |op| {
-        Ok(Inst::Alu { op, dst: f.reg_r(), lhs: f.reg_s(), rhs: f.reg_t() })
-    };
+    let alu = |op| Ok(Inst::Alu { op, dst: f.reg_r(), lhs: f.reg_s(), rhs: f.reg_t() });
 
     match f.op2() {
         0x0 => decode_st0(word, f),
@@ -470,22 +513,13 @@ fn decode_lsai(word: u32, f: Fields) -> Result<Inst, DecodeError> {
         0x9 => Ok(load(LoadKind::I16, 2)),
         // MOVI borrows the `s` field for the top 4 bits of a 12-bit signed immediate, so
         // it has no base register.
-        0xA => Ok(Inst::Movi {
-            dst: f.reg_t(),
-            imm: sign_extend((u32::from(f.s()) << 8) | imm8, 12),
-        }),
-        0xC => Ok(Inst::Addi {
-            dst: f.reg_t(),
-            src: f.reg_s(),
-            imm: sign_extend(imm8, 8),
-        }),
+        0xA => {
+            Ok(Inst::Movi { dst: f.reg_t(), imm: sign_extend((u32::from(f.s()) << 8) | imm8, 12) })
+        }
+        0xC => Ok(Inst::Addi { dst: f.reg_t(), src: f.reg_s(), imm: sign_extend(imm8, 8) }),
         // ADDMI scales its sign-extended 8-bit value by 256 — the "medium immediate"
         // used for stack frame offsets beyond ADDI's reach.
-        0xD => Ok(Inst::Addi {
-            dst: f.reg_t(),
-            src: f.reg_s(),
-            imm: sign_extend(imm8, 8) * 256,
-        }),
+        0xD => Ok(Inst::Addi { dst: f.reg_t(), src: f.reg_s(), imm: sign_extend(imm8, 8) * 256 }),
         // 0x3 and 0x8 reserved, 0x7 CACHE, 0xB L32AI, 0xE S32C1I, 0xF S32RI.
         0x3 | 0x8 => Err(DecodeError::Illegal { word }),
         _ => Err(unsupported(word, "cache/atomic load-store variant")),
@@ -577,12 +611,7 @@ fn decode16(pc: u32, word: u32) -> Result<Inst, DecodeError> {
             base: f.reg_s(),
             offset: u32::from(f.r()) * 4,
         }),
-        0xA => Ok(Inst::Alu {
-            op: AluOp::Add,
-            dst: f.reg_r(),
-            lhs: f.reg_s(),
-            rhs: f.reg_t(),
-        }),
+        0xA => Ok(Inst::Alu { op: AluOp::Add, dst: f.reg_r(), lhs: f.reg_s(), rhs: f.reg_t() }),
         // ADDI.N: the `t` field encodes 1..=15 directly, and 0 means -1. There is no
         // "add zero" narrow form because that is what MOV.N is for.
         0xB => Ok(Inst::Addi {
@@ -686,10 +715,7 @@ mod tests {
     #[test]
     fn ret_is_0x000080_and_the_all_zero_word_is_illegal() {
         assert_eq!(inst(0, &[0x80, 0x00, 0x00]), Inst::Ret);
-        assert_eq!(
-            decode_bytes(0, &[0x00, 0x00, 0x00]),
-            Err(DecodeError::Illegal { word: 0 })
-        );
+        assert_eq!(decode_bytes(0, &[0x00, 0x00, 0x00]), Err(DecodeError::Illegal { word: 0 }));
     }
 
     #[test]
@@ -785,15 +811,9 @@ mod tests {
 
     #[test]
     fn addi_and_addmi() {
-        assert_eq!(
-            inst(0, &[0x22, 0xC3, 0xFF]),
-            Inst::Addi { dst: A2, src: A3, imm: -1 }
-        );
+        assert_eq!(inst(0, &[0x22, 0xC3, 0xFF]), Inst::Addi { dst: A2, src: A3, imm: -1 });
         // addmi scales by 256.
-        assert_eq!(
-            inst(0, &[0x22, 0xD3, 0xFF]),
-            Inst::Addi { dst: A2, src: A3, imm: -256 }
-        );
+        assert_eq!(inst(0, &[0x22, 0xD3, 0xFF]), Inst::Addi { dst: A2, src: A3, imm: -256 });
     }
 
     // --- l32r ------------------------------------------------------------------------
@@ -833,15 +853,9 @@ mod tests {
     #[test]
     fn j_offsets_are_bytes_relative_to_pc_plus_four() {
         // offset -4 -> a branch to self, which is how firmware signals it is done.
-        assert_eq!(
-            inst(0x4008_0100, &[0x06, 0xFF, 0xFF]),
-            Inst::Jump { target: 0x4008_0100 }
-        );
+        assert_eq!(inst(0x4008_0100, &[0x06, 0xFF, 0xFF]), Inst::Jump { target: 0x4008_0100 });
         // offset +8
-        assert_eq!(
-            inst(0x4008_0000, &[0x06, 0x02, 0x00]),
-            Inst::Jump { target: 0x4008_000C }
-        );
+        assert_eq!(inst(0x4008_0000, &[0x06, 0x02, 0x00]), Inst::Jump { target: 0x4008_000C });
     }
 
     #[test]
@@ -870,12 +884,9 @@ mod tests {
             Inst::Branch { cond: Cond::Ne, lhs: A2, rhs: A3, target: 0x4008_000C }
         );
 
-        for (byte1, cond) in [
-            (0x22, Cond::Lt),
-            (0x32, Cond::Ltu),
-            (0xA2, Cond::Ge),
-            (0xB2, Cond::Geu),
-        ] {
+        for (byte1, cond) in
+            [(0x22, Cond::Lt), (0x32, Cond::Ltu), (0xA2, Cond::Ge), (0xB2, Cond::Geu)]
+        {
             assert!(matches!(
                 inst(0, &[0x37, byte1, 0x00]),
                 Inst::Branch { cond: c, .. } if c == cond
@@ -890,11 +901,7 @@ mod tests {
             inst(0x4008_0000, &[0x16, 0x02, 0x00]),
             Inst::BranchZero { cond: ZeroCond::Eq, src: A2, target: 0x4008_0004 }
         );
-        for (byte0, cond) in [
-            (0x56, ZeroCond::Ne),
-            (0x96, ZeroCond::Lt),
-            (0xD6, ZeroCond::Ge),
-        ] {
+        for (byte0, cond) in [(0x56, ZeroCond::Ne), (0x96, ZeroCond::Lt), (0xD6, ZeroCond::Ge)] {
             assert!(matches!(
                 inst(0, &[byte0, 0x02, 0x00]),
                 Inst::BranchZero { cond: c, .. } if c == cond
@@ -923,10 +930,7 @@ mod tests {
 
     #[test]
     fn narrow_add_and_addi() {
-        assert_eq!(
-            inst(0, &[0x4A, 0x23]),
-            Inst::Alu { op: AluOp::Add, dst: A2, lhs: A3, rhs: A4 }
-        );
+        assert_eq!(inst(0, &[0x4A, 0x23]), Inst::Alu { op: AluOp::Add, dst: A2, lhs: A3, rhs: A4 });
         assert_eq!(inst(0, &[0x5B, 0x23]), Inst::Addi { dst: A2, src: A3, imm: 5 });
         // t = 0 encodes -1, not 0.
         assert_eq!(inst(0, &[0x0B, 0x23]), Inst::Addi { dst: A2, src: A3, imm: -1 });
@@ -971,10 +975,7 @@ mod tests {
             [0x90, 0x00, 0x00],   // retw
             [0xE0, 0x00, 0x00],   // callx8
         ] {
-            assert!(matches!(
-                decode_bytes(0, &bytes),
-                Err(DecodeError::Unsupported { .. })
-            ));
+            assert!(matches!(decode_bytes(0, &bytes), Err(DecodeError::Unsupported { .. })));
         }
     }
 

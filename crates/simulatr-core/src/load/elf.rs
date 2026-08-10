@@ -49,13 +49,23 @@ pub enum LoadError {
     /// `-mdynconfig=.../xtensa_esp32.so` to get a little-endian ESP32 image.
     /// See `examples/build.sh`.
     NotLittleEndian,
-    NotAnExecutable { e_type: u16 },
-    NotXtensa { e_machine: u16 },
+    NotAnExecutable {
+        e_type: u16,
+    },
+    NotXtensa {
+        e_machine: u16,
+    },
     Truncated,
-    BadProgramHeaderSize { size: u16 },
+    BadProgramHeaderSize {
+        size: u16,
+    },
     NoLoadableSegments,
-    SegmentFileRangeOutOfBounds { index: u16 },
-    SegmentMemorySizeTooSmall { index: u16 },
+    SegmentFileRangeOutOfBounds {
+        index: u16,
+    },
+    SegmentMemorySizeTooSmall {
+        index: u16,
+    },
     Bus(BusError),
 }
 
@@ -70,10 +80,9 @@ impl fmt::Display for LoadError {
         match *self {
             LoadError::NotAnElfFile => write!(f, "not an ELF file"),
             LoadError::NotElf32 => write!(f, "not a 32-bit ELF"),
-            LoadError::NotLittleEndian => write!(
-                f,
-                "not a little-endian ELF (rebuild with -mdynconfig=.../xtensa_esp32.so)"
-            ),
+            LoadError::NotLittleEndian => {
+                write!(f, "not a little-endian ELF (rebuild with -mdynconfig=.../xtensa_esp32.so)")
+            }
             LoadError::NotAnExecutable { e_type } => {
                 write!(f, "not an executable (e_type = {e_type})")
             }
@@ -146,9 +155,7 @@ pub fn load(bus: &mut Bus, image: &[u8]) -> Result<LoadResult, LoadError> {
 
     for index in 0..e_phnum {
         let start = e_phoff + PHDR_SIZE * usize::from(index);
-        let phdr = image
-            .get(start..start + PHDR_SIZE)
-            .ok_or(LoadError::Truncated)?;
+        let phdr = image.get(start..start + PHDR_SIZE).ok_or(LoadError::Truncated)?;
 
         if u32_at(phdr, 0x00) != PT_LOAD {
             continue;
@@ -195,12 +202,7 @@ fn u16_at(bytes: &[u8], offset: usize) -> u16 {
 }
 
 fn u32_at(bytes: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes([
-        bytes[offset],
-        bytes[offset + 1],
-        bytes[offset + 2],
-        bytes[offset + 3],
-    ])
+    u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
 }
 
 #[cfg(test)]
@@ -267,10 +269,7 @@ mod tests {
         let elf = TestElf::simple(&[0xDE, 0xC0, 0xAD, 0x0B]);
 
         let result = load(&mut bus, &elf.bytes).unwrap();
-        assert_eq!(
-            result,
-            LoadResult { entry: IRAM_BASE, segments_loaded: 1, bytes_loaded: 4 }
-        );
+        assert_eq!(result, LoadResult { entry: IRAM_BASE, segments_loaded: 1, bytes_loaded: 4 });
         assert_eq!(bus.read32(IRAM_BASE).unwrap(), 0x0BAD_C0DE);
     }
 

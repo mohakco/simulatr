@@ -34,14 +34,12 @@ impl Uart {
     /// Handle a write inside the UART0 register block. `offset` is relative to
     /// `soc::esp32::UART0_BASE`.
     pub fn write_reg(&mut self, offset: u32, value: u32) {
-        match offset {
+        // Everything else — baud rate, line control, interrupt masks — is accepted and
+        // discarded. Firmware configures the UART before using it and must not fault.
+        if offset == uart_reg::FIFO {
             // Only the low 8 bits reach the shift register.
-            uart_reg::FIFO => {
-                self.tx.push(value as u8);
-                self.transmitted += 1;
-            }
-            // Baud rate, line control, interrupt masks, ...: accepted and discarded.
-            _ => {}
+            self.tx.push(value as u8);
+            self.transmitted += 1;
         }
     }
 

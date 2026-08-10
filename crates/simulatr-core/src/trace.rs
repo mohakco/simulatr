@@ -60,7 +60,7 @@ mod tests {
                 Inst::Movi { dst: Reg::new(2), imm: 0x48 },
                 InstSize::Wide,
                 0x4008_0000,
-                0x4822_A0,
+                0x0048_22A0,
             ),
             &regs,
         );
@@ -100,12 +100,7 @@ mod tests {
         }
 
         let mut out = String::new();
-        write_json_line(
-            &mut out,
-            0,
-            &executed(Inst::Nop, InstSize::Wide, 0, 0x0020F0),
-            &regs,
-        );
+        write_json_line(&mut out, 0, &executed(Inst::Nop, InstSize::Wide, 0, 0x0020F0), &regs);
 
         // Five commas separate the six scalar fields, plus fifteen between the registers.
         assert_eq!(out.matches(',').count(), 5 + 15);

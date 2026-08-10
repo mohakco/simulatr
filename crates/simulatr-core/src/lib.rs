@@ -41,7 +41,7 @@ pub mod soc;
 pub mod trace;
 
 pub use cpu::core::{Cpu, Executed, Fault, HALT_ADDRESS, HaltReason};
-pub use cpu::decode::{Decoded, DecodeError, Inst, InstSize, Reg};
+pub use cpu::decode::{DecodeError, Decoded, Inst, InstSize, Reg};
 pub use load::elf::{LoadError, LoadResult};
 pub use machine::{DEFAULT_STEP_BUDGET, Machine, Observer, RunSummary};
 pub use mem::bus::{Bus, BusError};

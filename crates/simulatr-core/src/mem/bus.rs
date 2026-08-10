@@ -73,14 +73,8 @@ pub struct Bus {
 impl fmt::Debug for Bus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Bus")
-            .field(
-                "iram",
-                &format_args!("{} bytes @ {:#010x}", self.iram.len(), esp32::IRAM_BASE),
-            )
-            .field(
-                "dram",
-                &format_args!("{} bytes @ {:#010x}", self.dram.len(), esp32::DRAM_BASE),
-            )
+            .field("iram", &format_args!("{} bytes @ {:#010x}", self.iram.len(), esp32::IRAM_BASE))
+            .field("dram", &format_args!("{} bytes @ {:#010x}", self.dram.len(), esp32::DRAM_BASE))
             .field("uart", &self.uart)
             .finish()
     }
@@ -128,7 +122,7 @@ impl Bus {
     /// One implementation for all three widths; the result is zero-extended into a u32.
     fn load(&self, addr: u32, width: Width) -> Result<u32, BusError> {
         let size = width.bytes();
-        if addr % size != 0 {
+        if !addr.is_multiple_of(size) {
             return Err(BusError::Unaligned { addr, width });
         }
 
@@ -162,7 +156,7 @@ impl Bus {
 
     fn store(&mut self, addr: u32, width: Width, value: u32) -> Result<(), BusError> {
         let size = width.bytes();
-        if addr % size != 0 {
+        if !addr.is_multiple_of(size) {
             return Err(BusError::Unaligned { addr, width });
         }
 
@@ -204,30 +198,21 @@ impl Bus {
             _ => return Err(BusError::Unmapped { addr }),
         };
         let end = offset as usize + len as usize;
-        region
-            .get_mut(offset as usize..end)
-            .ok_or(BusError::RegionOverrun { addr, len })
+        region.get_mut(offset as usize..end).ok_or(BusError::RegionOverrun { addr, len })
     }
 }
 
 fn read_le(mem: &[u8], offset: u32, size: u32, addr: u32) -> Result<u32, BusError> {
     let start = offset as usize;
-    let bytes = mem
-        .get(start..start + size as usize)
-        .ok_or(BusError::RegionOverrun { addr, len: size })?;
+    let bytes =
+        mem.get(start..start + size as usize).ok_or(BusError::RegionOverrun { addr, len: size })?;
 
     let mut word = [0u8; 4];
     word[..bytes.len()].copy_from_slice(bytes);
     Ok(u32::from_le_bytes(word))
 }
 
-fn write_le(
-    mem: &mut [u8],
-    offset: u32,
-    size: u32,
-    addr: u32,
-    value: u32,
-) -> Result<(), BusError> {
+fn write_le(mem: &mut [u8], offset: u32, size: u32, addr: u32, value: u32) -> Result<(), BusError> {
     let start = offset as usize;
     let bytes = mem
         .get_mut(start..start + size as usize)

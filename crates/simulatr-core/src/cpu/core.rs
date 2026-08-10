@@ -528,10 +528,7 @@ mod tests {
             0x22, 0x62, 0x00, // s32i a2, a2, 0
             0x80, 0x00, 0x00, // ret
         ]);
-        assert_eq!(
-            h.run(100),
-            HaltReason::Fault(Fault::Bus(BusError::Unmapped { addr: 0 }))
-        );
+        assert_eq!(h.run(100), HaltReason::Fault(Fault::Bus(BusError::Unmapped { addr: 0 })));
     }
 
     #[test]

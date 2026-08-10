@@ -48,9 +48,15 @@ pub mod uart_reg {
 /// memory.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mapping {
-    Iram { offset: u32 },
-    Dram { offset: u32 },
-    Uart0 { offset: u32 },
+    Iram {
+        offset: u32,
+    },
+    Dram {
+        offset: u32,
+    },
+    Uart0 {
+        offset: u32,
+    },
     /// Inside the peripheral window, but not a peripheral we model. Distinct from
     /// `Unmapped` so a run that dies tells you "not written yet" rather than
     /// "nothing there".
@@ -89,10 +95,7 @@ mod tests {
     #[test]
     fn ram_region_boundaries() {
         assert_eq!(decode(IRAM_BASE), Mapping::Iram { offset: 0 });
-        assert_eq!(
-            decode(IRAM_BASE + IRAM_SIZE - 1),
-            Mapping::Iram { offset: IRAM_SIZE - 1 }
-        );
+        assert_eq!(decode(IRAM_BASE + IRAM_SIZE - 1), Mapping::Iram { offset: IRAM_SIZE - 1 });
         assert_eq!(decode(IRAM_BASE + IRAM_SIZE), Mapping::Unmapped);
         assert_eq!(decode(IRAM_BASE - 1), Mapping::Unmapped);
 

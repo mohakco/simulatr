@@ -1,0 +1,4 @@
+# Keep struct literals, enum variants and match arms on one line where they fit. The
+# decoder and the SoC memory map are far easier to read as compact tables than as
+# one-field-per-line blocks.
+use_small_heuristics = "Max"
