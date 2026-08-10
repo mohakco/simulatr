@@ -1,0 +1,21 @@
+// Package manifest. `zig build` reads this for the package name, version and, since
+// Zig 0.14, a `fingerprint` — a random 64-bit id that uniquely identifies this package
+// even if it is renamed or vendored. If Zig complains that the fingerprint is wrong it
+// prints the correct value; paste that in.
+.{
+    .name = .simulatr,
+    .version = "0.1.0",
+    .fingerprint = 0x11367659372d2e59,
+    .minimum_zig_version = "0.16.0",
+
+    // Files that belong to the package. `zig build` hashes these when this package is
+    // consumed as a dependency.
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "README.md",
+    },
+
+    .dependencies = .{},
+}
