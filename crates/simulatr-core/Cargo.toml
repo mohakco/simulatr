@@ -1,0 +1,11 @@
+[package]
+name = "simulatr-core"
+description = "Deterministic ESP32 (Xtensa LX6) emulation core: decoder, CPU, bus, peripherals, ELF loader."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Intentionally empty, and it must stay that way. See docs/DECISIONS.md.
+[dependencies]

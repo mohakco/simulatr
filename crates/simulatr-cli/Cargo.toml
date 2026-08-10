@@ -1,0 +1,16 @@
+[package]
+name = "simulatr-cli"
+description = "Command-line front end for simulatr."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "simulatr"
+path = "src/main.rs"
+
+[dependencies]
+simulatr-core = { path = "../simulatr-core" }
+clap = { version = "4", features = ["derive"] }
